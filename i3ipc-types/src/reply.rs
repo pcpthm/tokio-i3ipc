@@ -16,8 +16,8 @@ pub type Workspaces = Vec<Workspace>;
 
 #[derive(Deserialize, Serialize, Eq, PartialEq, Clone, Hash, Debug)]
 pub struct Workspace {
-    pub id: usize,
-    pub num: usize,
+    pub id: i64,
+    pub num: i32,
     pub name: String,
     pub visible: bool,
     pub focused: bool,
@@ -41,7 +41,7 @@ pub struct Output {
 /// Tree/Node reply
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct Node {
-    pub id: usize,
+    pub id: i64,
     pub name: Option<String>,
     #[serde(rename = "type")]
     pub node_type: NodeType,
@@ -54,19 +54,27 @@ pub struct Node {
     pub window_rect: Rect,
     pub deco_rect: Rect,
     pub geometry: Rect,
-    pub window: Option<u32>,
+    pub window: Option<i64>,
     pub window_properties: Option<WindowProperties>,
     pub window_type: Option<WindowType>,
     pub current_border_width: i32,
     pub urgent: bool,
     pub marks: Option<Marks>,
     pub focused: bool,
-    pub focus: Vec<usize>,
+    pub focus: Vec<i64>,
     pub sticky: bool,
     pub floating: Option<Floating>,
     pub floating_nodes: Vec<Node>,
-    pub fullscreen_mode: FullscreenMode,
+    pub fullscreen_mode: FullscreenMode, // only containers and views
     pub nodes: Vec<Node>,
+
+    pub representation: Option<String>,          // only workspaces
+    pub app_id: Option<String>,                  // only views
+    pub pid: Option<i32>,                        // only views
+    pub visible: Option<bool>,                   // only views
+    pub shell: Option<String>,                   // only views
+    pub inhibit_idle: Option<bool>,              // only views
+    pub idle_inhibitors: Option<IdleInhibitors>, // only views
 }
 
 impl PartialEq for Node {
@@ -77,74 +85,15 @@ impl PartialEq for Node {
 
 impl Eq for Node {}
 
-#[derive(Eq, Serialize, PartialEq, Clone, Debug)]
+#[derive(Eq, Serialize, Deserialize, PartialEq, Clone, Debug)]
 pub struct WindowProperties {
-    title: Option<String>,
-    instance: Option<String>,
-    class: Option<String>,
-    window_role: Option<String>,
-    transient_for: Option<u64>,
-}
+    pub title: Option<String>,
+    pub instance: Option<String>,
+    pub class: Option<String>,
+    pub window_role: Option<String>,
+    pub transient_for: Option<i64>,
 
-impl<'de> serde::Deserialize<'de> for WindowProperties {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize, Serialize, PartialEq, Clone, Debug)]
-        struct Intermediate(HashMap<WindowProperty, Option<WindowData>>);
-
-        #[derive(Serialize, Deserialize, Eq, PartialEq, Clone, Debug)]
-        #[serde(untagged)]
-        enum WindowData {
-            Str(String),
-            Num(u64),
-        }
-        impl WindowData {
-            fn unwrap_str(self) -> String {
-                match self {
-                    WindowData::Str(s) => s,
-                    _ => unreachable!("cant have non-string value"),
-                }
-            }
-
-            fn unwrap_num(self) -> u64 {
-                match self {
-                    WindowData::Num(n) => n,
-                    _ => unreachable!("cant have non-num value"),
-                }
-            }
-        }
-        let mut input = Intermediate::deserialize(deserializer)?;
-        let title = input
-            .0
-            .get_mut(&WindowProperty::Title)
-            .and_then(|x| x.take().map(|x| x.unwrap_str()));
-        let instance = input
-            .0
-            .get_mut(&WindowProperty::Instance)
-            .and_then(|x| x.take().map(|x| x.unwrap_str()));
-        let class = input
-            .0
-            .get_mut(&WindowProperty::Class)
-            .and_then(|x| x.take().map(|x| x.unwrap_str()));
-        let window_role = input
-            .0
-            .get_mut(&WindowProperty::WindowRole)
-            .and_then(|x| x.take().map(|x| x.unwrap_str()));
-        let transient_for = input
-            .0
-            .get_mut(&WindowProperty::TransientFor)
-            .and_then(|x| x.take().map(|x| x.unwrap_num()));
-
-        Ok(WindowProperties {
-            title,
-            instance,
-            class,
-            window_role,
-            transient_for,
-        })
-    }
+    pub window_type: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Eq, PartialEq, Copy, Clone, Hash, Debug)]
@@ -193,10 +142,10 @@ pub enum WindowType {
 
 #[derive(Deserialize, Serialize, Eq, PartialEq, Clone, Hash, Debug)]
 pub struct Rect {
-    pub x: usize,
-    pub y: usize,
-    pub width: usize,
-    pub height: usize,
+    pub x: i64,
+    pub y: i64,
+    pub width: i64,
+    pub height: i64,
 }
 
 #[derive(Deserialize, Serialize, Eq, PartialEq, Clone, Hash, Debug, Copy)]
@@ -215,6 +164,7 @@ pub enum NodeBorder {
     Normal,
     None,
     Pixel,
+    Csd,
 }
 
 #[derive(Deserialize, Serialize, Eq, PartialEq, Hash, Debug, Clone, Copy)]
@@ -226,6 +176,7 @@ pub enum NodeLayout {
     Tabbed,
     Dockarea,
     Output,
+    None,
 }
 
 #[derive(Deserialize, Serialize, Eq, PartialEq, Hash, Debug, Clone, Copy)]
@@ -233,6 +184,29 @@ pub enum NodeLayout {
 pub enum NodeOrientation {
     Horizontal,
     Vertical,
+    None,
+}
+
+#[derive(Deserialize, Serialize, Eq, PartialEq, Debug, Clone)]
+pub struct IdleInhibitors {
+    pub application: IdleInhibitorApplication,
+    pub user: IdleInhibitorUser,
+}
+
+#[derive(Deserialize, Serialize, Eq, PartialEq, Hash, Debug, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum IdleInhibitorApplication {
+    Enabled,
+    None,
+}
+
+#[derive(Deserialize, Serialize, Eq, PartialEq, Hash, Debug, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum IdleInhibitorUser {
+    Focus,
+    FullScreen,
+    Open,
+    Visible,
     None,
 }
 
@@ -287,9 +261,9 @@ pub enum BarPart {
 /// Version reply
 #[derive(Deserialize, Serialize, Eq, PartialEq, Hash, Debug, Clone)]
 pub struct Version {
-    pub major: usize,
-    pub minor: usize,
-    pub patch: usize,
+    pub major: i32,
+    pub minor: i32,
+    pub patch: i32,
     pub human_readable: String,
     pub loaded_config_file_name: String,
 }
